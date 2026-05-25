@@ -35,21 +35,43 @@ from .orderbooks import (
 )
 
 
+def _with_week_label(df: pd.DataFrame) -> pd.DataFrame:
+    chart_df = df.copy()
+    chart_df["date_week_label"] = chart_df["date"].dt.strftime("%Y-%m-%d (%A)")
+    return chart_df
+
+
 def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder, absolute_placeholder) -> None:
+    chart_df = _with_week_label(market_share_df)
+
     market_share_fig = px.area(
-        market_share_df,
+        chart_df,
         x="date",
         y="open_interest_share_pct",
         color="source",
         color_discrete_map=PLATFORM_COLORS,
-        hover_data={
-            "open_interest_share_pct": ":.2f",
-            "open_interest_usd": ":,.0f",
-            "open_interest_original_usd": ":,.0f",
-            "was_interpolated": True,
-            "total_open_interest_usd": ":,.0f",
-        },
         title=OPEN_INTEREST_SHARE_TITLE,
+    )
+    market_share_fig.update_traces(
+        customdata=chart_df[
+            [
+                "date_week_label",
+                "open_interest_usd",
+                "open_interest_original_usd",
+                "was_interpolated",
+                "total_open_interest_usd",
+            ]
+        ],
+        hovertemplate=(
+            "Date: %{customdata[0]}"
+            "<br>Platform: %{fullData.name}"
+            "<br>Share: %{y:.2f}%"
+            "<br>Open Interest: $%{customdata[1]:,.0f}"
+            "<br>Original Open Interest: $%{customdata[2]:,.0f}"
+            "<br>Interpolated: %{customdata[3]}"
+            "<br>Total Open Interest: $%{customdata[4]:,.0f}"
+            "<extra></extra>"
+        ),
     )
     market_share_fig.update_xaxes(title_text="Date")
     market_share_fig.update_yaxes(title_text="Share (%)", range=[0, 100], ticksuffix="%")
@@ -57,19 +79,33 @@ def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder,
     chart_placeholder.plotly_chart(market_share_fig, use_container_width=True)
 
     market_absolute_fig = px.area(
-        market_share_df,
+        chart_df,
         x="date",
         y="open_interest_usd",
         color="source",
         color_discrete_map=PLATFORM_COLORS,
-        hover_data={
-            "open_interest_usd": ":,.0f",
-            "open_interest_original_usd": ":,.0f",
-            "was_interpolated": True,
-            "total_open_interest_usd": ":,.0f",
-            "open_interest_share_pct": ":.2f",
-        },
         title=OPEN_INTEREST_ABSOLUTE_TITLE,
+    )
+    market_absolute_fig.update_traces(
+        customdata=chart_df[
+            [
+                "date_week_label",
+                "open_interest_original_usd",
+                "was_interpolated",
+                "total_open_interest_usd",
+                "open_interest_share_pct",
+            ]
+        ],
+        hovertemplate=(
+            "Date: %{customdata[0]}"
+            "<br>Platform: %{fullData.name}"
+            "<br>Open Interest: $%{y:,.0f}"
+            "<br>Original Open Interest: $%{customdata[1]:,.0f}"
+            "<br>Interpolated: %{customdata[2]}"
+            "<br>Total Open Interest: $%{customdata[3]:,.0f}"
+            "<br>Share: %{customdata[4]:.2f}%"
+            "<extra></extra>"
+        ),
     )
     market_absolute_fig.update_xaxes(title_text="Date")
     market_absolute_fig.update_yaxes(title_text="Open Interest (USD)", tickprefix="$", separatethousands=True)
@@ -231,40 +267,67 @@ def render_kpi_1() -> None:
     st.caption(f"Data refresh time: {snapshot_time}")
 
 
-def _render_ratio_chart(ratio_df: pd.DataFrame, chart_placeholder) -> None:
+def _render_ratio_chart(
+    ratio_df: pd.DataFrame,
+    chart_placeholder,
+    chart_title: str,
+    y_axis_max: float,
+) -> None:
+    chart_df = _with_week_label(ratio_df)
+
     ratio_fig = px.line(
-        ratio_df,
+        chart_df,
         x="date",
         y="volume_oi_ratio_7d",
         color="source",
         color_discrete_map=PLATFORM_COLORS,
         markers=True,
-        title=ROLLING_RATIO_TITLE,
+        title=chart_title,
+    )
+    ratio_fig.update_traces(
+        customdata=chart_df[["date_week_label"]],
+        hovertemplate=(
+            "Date: %{customdata[0]}"
+            "<br>Platform: %{fullData.name}"
+            "<br>Volume / Open Interest ratio: %{y:.2f}"
+            "<extra></extra>"
+        ),
     )
     ratio_fig.update_xaxes(title_text="Date")
-    ratio_fig.update_yaxes(title_text="Volume / Open Interest ratio")
+    ratio_fig.update_yaxes(title_text="Volume / Open Interest ratio", range=[0, y_axis_max])
     ratio_fig.update_layout(legend_title_text="Platform", template="plotly_white")
     chart_placeholder.plotly_chart(ratio_fig, use_container_width=True)
 
 
-def render_kpi_2() -> None:
+def render_kpi_2(ratio_mode: str = "7d rolling") -> None:
+    rolling_days = 7 if ratio_mode == "7d rolling" else 1
+    ratio_title = ROLLING_RATIO_TITLE if rolling_days == 7 else "Daily Volume / Open Interest ratio"
+    ratio_y_axis_max = 2.0
+
+    ratio_overflow_warning = st.empty()
     ratio_chart_placeholder = st.empty()
     ratio_chart_placeholder.info("Loading...")
     chart_rendered = False
+    displayed_ratio_df = pd.DataFrame()
 
     try:
         merged_market_data = fetch_merged_market_data()
-        rolling_ratio_df = compute_rolling_volume_oi_ratio(merged_market_data, lookback_days=180, rolling_days=7)
+        rolling_ratio_df = compute_rolling_volume_oi_ratio(
+            merged_market_data,
+            lookback_days=180,
+            rolling_days=rolling_days,
+        )
     except Exception as exc:
         ratio_chart_placeholder.empty()
-        st.warning(f"Could not load 7d rolling Volume / Open Interest ratio data: {exc}")
+        st.warning(f"Could not load {ratio_mode} Volume / Open Interest ratio data: {exc}")
         st.stop()
 
     if rolling_ratio_df.empty:
-        st.info("No valid merged data points available for the 7d rolling Volume / Open Interest ratio chart.")
+        st.info(f"No valid merged data points available for the {ratio_mode} Volume / Open Interest ratio chart.")
     else:
-        _render_ratio_chart(rolling_ratio_df, ratio_chart_placeholder)
+        _render_ratio_chart(rolling_ratio_df, ratio_chart_placeholder, ratio_title, ratio_y_axis_max)
         chart_rendered = True
+        displayed_ratio_df = rolling_ratio_df
 
     opinion_status = st.empty()
     opinion_status.info("Loading Opinion from Dune…")
@@ -275,11 +338,17 @@ def render_kpi_2() -> None:
             rolling_ratio_with_opinion = compute_rolling_volume_oi_ratio(
                 merged_with_opinion,
                 lookback_days=180,
-                rolling_days=7,
+                rolling_days=rolling_days,
             )
             if not rolling_ratio_with_opinion.empty:
-                _render_ratio_chart(rolling_ratio_with_opinion, ratio_chart_placeholder)
+                _render_ratio_chart(
+                    rolling_ratio_with_opinion,
+                    ratio_chart_placeholder,
+                    ratio_title,
+                    ratio_y_axis_max,
+                )
                 chart_rendered = True
+                displayed_ratio_df = rolling_ratio_with_opinion
                 opinion_status.empty()
             else:
                 opinion_status.warning("Opinion Dune data loaded but produced no valid KPI 2 points.")
@@ -294,7 +363,26 @@ def render_kpi_2() -> None:
         except Exception:
             pass
 
+    if not displayed_ratio_df.empty:
+        opinion_overflow = displayed_ratio_df[
+            (displayed_ratio_df["source"] == "Opinion")
+            & displayed_ratio_df["volume_oi_ratio_7d"].notna()
+            & (displayed_ratio_df["volume_oi_ratio_7d"] > ratio_y_axis_max)
+        ]
+        if not opinion_overflow.empty:
+            max_ratio = float(opinion_overflow["volume_oi_ratio_7d"].max())
+            ratio_overflow_warning.warning(
+                f"⚠️ Opinion ratio exceeds chart max ({ratio_y_axis_max:.1f}). "
+                f"Highest point is {max_ratio:.2f}; values above the cap are clipped. "
+                "Use pan to inspect overflowed values."
+            )
+        else:
+            ratio_overflow_warning.empty()
+    else:
+        ratio_overflow_warning.empty()
+
     if not chart_rendered:
+        ratio_overflow_warning.empty()
         ratio_chart_placeholder.empty()
 
     snapshot_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -330,27 +418,23 @@ def render_kpi_3() -> None:
         ignore_index=True,
     )
 
-    opinion_slippage_at_ten = (
-        slippage[
-            (slippage["platform"] == "Opinion")
-            & (slippage["executed_usd"] >= 10)
-            & slippage["avg_slippage_pct"].notna()
-        ]
-        .sort_values("executed_usd")
-        .head(1)
-    )
-    if (
-        not opinion_slippage_at_ten.empty
-        and float(opinion_slippage_at_ten.iloc[0]["avg_slippage_pct"]) > 25
-    ):
+    kpi3_y_axis_max = 30.0
+    chart_df = slippage[slippage["executed_usd"] > 0].copy()
+    opinion_overflow = chart_df[
+        (chart_df["platform"] == "Opinion")
+        & chart_df["avg_slippage_pct"].notna()
+        & (chart_df["avg_slippage_pct"] > kpi3_y_axis_max)
+    ]
+    if not opinion_overflow.empty:
+        max_slippage = float(opinion_overflow["avg_slippage_pct"].max())
         warning_placeholder.error(
-            "⚠️ Opinion slippage is already above 25% at $10 executed. "
-            "Its curve is above the chart range — pan to see it."
+            f"⚠️ Opinion slippage exceeds chart max ({kpi3_y_axis_max:.0f}%). "
+            f"Highest point is {max_slippage:.2f}% and values above the cap are clipped. "
+            "Use pan to inspect overflowed values."
         )
     else:
         warning_placeholder.empty()
 
-    chart_df = slippage[slippage["executed_usd"] > 0].copy()
     if chart_df.empty:
         chart_placeholder.empty()
         st.info("No valid slippage points available for the live depth comparison chart.")
@@ -362,11 +446,20 @@ def render_kpi_3() -> None:
             color="platform",
             color_discrete_map=PLATFORM_COLORS,
             markers=True,
-            hover_data={"mid": ":.4f"},
             title=f"{TITLE}<br><sup>Average over YES and NO</sup>",
         )
+        fig.update_traces(
+            customdata=chart_df[["mid"]],
+            hovertemplate=(
+                "Platform: %{fullData.name}"
+                "<br>USD executed: $%{x:,.0f}"
+                "<br>Average slippage: %{y:.2f}%"
+                "<br>Mid: %{customdata[0]:.4f}"
+                "<extra></extra>"
+            ),
+        )
         fig.update_xaxes(type="log", title_text="USD executed (log scale)")
-        fig.update_yaxes(title_text="Slippage (%)", range=[0, 30])
+        fig.update_yaxes(title_text="Slippage (%)", range=[0, kpi3_y_axis_max])
         fig.update_layout(legend_title_text="Platform", template="plotly_white")
 
         chart_placeholder.plotly_chart(fig, use_container_width=True)
