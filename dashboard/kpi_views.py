@@ -34,11 +34,41 @@ from .orderbooks import (
     normalize_polymarket_book,
 )
 
+KPI_EVENT_MARKERS = [
+    (pd.Timestamp("2026-03-05", tz="UTC"), "$OPN airdrop"),
+]
+
 
 def _with_week_label(df: pd.DataFrame) -> pd.DataFrame:
     chart_df = df.copy()
     chart_df["date_week_label"] = chart_df["date"].dt.strftime("%Y-%m-%d (%A)")
     return chart_df
+
+
+def _add_event_markers(fig) -> None:
+    for event_date, event_label in KPI_EVENT_MARKERS:
+        event_x = event_date.strftime("%Y-%m-%d")
+        fig.add_shape(
+            type="line",
+            x0=event_x,
+            x1=event_x,
+            y0=0,
+            y1=1,
+            xref="x",
+            yref="paper",
+            line=dict(color="#6B7280", dash="dash", width=1.5),
+        )
+        fig.add_annotation(
+            x=event_x,
+            y=1,
+            xref="x",
+            yref="paper",
+            text=event_label,
+            showarrow=False,
+            xanchor="left",
+            yanchor="bottom",
+            font=dict(color="#6B7280", size=11),
+        )
 
 
 def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder, absolute_placeholder) -> None:
@@ -73,6 +103,7 @@ def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder,
             "<extra></extra>"
         ),
     )
+    _add_event_markers(market_share_fig)
     market_share_fig.update_xaxes(title_text="Date")
     market_share_fig.update_yaxes(title_text="Share (%)", range=[0, 100], ticksuffix="%")
     market_share_fig.update_layout(legend_title_text="Platform", template="plotly_white")
@@ -107,6 +138,7 @@ def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder,
             "<extra></extra>"
         ),
     )
+    _add_event_markers(market_absolute_fig)
     market_absolute_fig.update_xaxes(title_text="Date")
     market_absolute_fig.update_yaxes(title_text="Open Interest (USD)", tickprefix="$", separatethousands=True)
     market_absolute_fig.update_layout(legend_title_text="Platform", template="plotly_white")
@@ -293,6 +325,7 @@ def _render_ratio_chart(
             "<extra></extra>"
         ),
     )
+    _add_event_markers(ratio_fig)
     ratio_fig.update_xaxes(title_text="Date")
     ratio_fig.update_yaxes(title_text="Volume / Open Interest ratio", range=[0, y_axis_max])
     ratio_fig.update_layout(legend_title_text="Platform", template="plotly_white")
