@@ -76,11 +76,10 @@ def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder,
     absolute_placeholder.plotly_chart(market_absolute_fig, use_container_width=True)
 
 
-def _render_interpolation_note(market_share_df: pd.DataFrame, note_placeholder) -> None:
+def _build_interpolation_points(market_share_df: pd.DataFrame) -> pd.DataFrame:
     interpolated_df = market_share_df[market_share_df["was_interpolated"]].copy()
     if interpolated_df.empty:
-        note_placeholder.empty()
-        return
+        return pd.DataFrame()
 
     interpolation_points = interpolated_df[
         ["date", "source", "open_interest_original_usd", "open_interest_usd", "notional_volume_usd"]
@@ -94,6 +93,14 @@ def _render_interpolation_note(market_share_df: pd.DataFrame, note_placeholder) 
             "notional_volume_usd": "notional_volume_usd",
         }
     )
+    return interpolation_points.sort_values(["date", "platform"]).reset_index(drop=True)
+
+
+def _render_interpolation_note(market_share_df: pd.DataFrame, note_placeholder) -> None:
+    interpolation_points = _build_interpolation_points(market_share_df)
+    if interpolation_points.empty:
+        note_placeholder.empty()
+        return
 
     interpolated_date_platforms = interpolation_points[["date", "platform"]].drop_duplicates().sort_values(["date", "platform"])
     date_platform_labels = [
@@ -110,14 +117,29 @@ def _render_interpolation_note(market_share_df: pd.DataFrame, note_placeholder) 
             "Rule: when daily OI is 0 while daily volume is positive, OI is linearly interpolated "
             "from previous and next day values for that platform."
         )
-        with st.expander("View interpolation audit table"):
-            st.dataframe(interpolation_points, use_container_width=True, hide_index=True)
+        st.markdown(
+            "<a href='#kpi1-interpolation-audit-table'><button>Jump to interpolation audit table</button></a>",
+            unsafe_allow_html=True,
+        )
+
+
+def _render_interpolation_audit_table(market_share_df: pd.DataFrame, table_placeholder) -> None:
+    interpolation_points = _build_interpolation_points(market_share_df)
+    if interpolation_points.empty:
+        table_placeholder.empty()
+        return
+
+    with table_placeholder.container():
+        st.markdown("<div id='kpi1-interpolation-audit-table'></div>", unsafe_allow_html=True)
+        st.subheader("Interpolation audit table")
+        st.dataframe(interpolation_points, use_container_width=True, hide_index=True)
 
 
 def render_kpi_1() -> None:
+    interpolation_note_placeholder = st.empty()
     market_share_chart_placeholder = st.empty()
     market_absolute_chart_placeholder = st.empty()
-    interpolation_note_placeholder = st.empty()
+    interpolation_audit_table_placeholder = st.empty()
 
     try:
         merged_market_data = fetch_merged_market_data()
@@ -129,9 +151,11 @@ def render_kpi_1() -> None:
     if market_share_df.empty:
         st.info("No valid merged data points available for the open interest market share chart.")
         _render_interpolation_note(market_share_df, interpolation_note_placeholder)
+        _render_interpolation_audit_table(market_share_df, interpolation_audit_table_placeholder)
     else:
-        _render_market_share_chart(market_share_df, market_share_chart_placeholder, market_absolute_chart_placeholder)
         _render_interpolation_note(market_share_df, interpolation_note_placeholder)
+        _render_market_share_chart(market_share_df, market_share_chart_placeholder, market_absolute_chart_placeholder)
+        _render_interpolation_audit_table(market_share_df, interpolation_audit_table_placeholder)
 
     opinion_status = st.empty()
     opinion_status.info("Loading Opinion from Dune…")
@@ -144,12 +168,13 @@ def render_kpi_1() -> None:
                 lookback_days=90,
             )
             if not market_share_with_opinion.empty:
+                _render_interpolation_note(market_share_with_opinion, interpolation_note_placeholder)
                 _render_market_share_chart(
                     market_share_with_opinion,
                     market_share_chart_placeholder,
                     market_absolute_chart_placeholder,
                 )
-                _render_interpolation_note(market_share_with_opinion, interpolation_note_placeholder)
+                _render_interpolation_audit_table(market_share_with_opinion, interpolation_audit_table_placeholder)
                 opinion_status.success("Opinion loaded from Dune.")
             else:
                 opinion_status.warning("Opinion Dune data loaded but produced no valid KPI 1 points.")
