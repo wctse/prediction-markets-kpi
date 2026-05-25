@@ -173,7 +173,7 @@ def render_kpi_1() -> None:
 
     try:
         merged_market_data = fetch_merged_market_data()
-        market_share_df = compute_open_interest_market_share(merged_market_data, lookback_days=90)
+        market_share_df = compute_open_interest_market_share(merged_market_data, lookback_days=180)
     except Exception as exc:
         market_share_chart_placeholder.empty()
         market_absolute_chart_placeholder.empty()
@@ -198,7 +198,7 @@ def render_kpi_1() -> None:
             merged_with_opinion = pd.concat([merged_market_data, opinion_market_data], ignore_index=True)
             market_share_with_opinion = compute_open_interest_market_share(
                 merged_with_opinion,
-                lookback_days=90,
+                lookback_days=180,
             )
             if not market_share_with_opinion.empty:
                 _render_interpolation_note(market_share_with_opinion, interpolation_note_placeholder)
@@ -254,7 +254,7 @@ def render_kpi_2() -> None:
 
     try:
         merged_market_data = fetch_merged_market_data()
-        rolling_ratio_df = compute_rolling_volume_oi_ratio(merged_market_data, lookback_days=90, rolling_days=7)
+        rolling_ratio_df = compute_rolling_volume_oi_ratio(merged_market_data, lookback_days=180, rolling_days=7)
     except Exception as exc:
         ratio_chart_placeholder.empty()
         st.warning(f"Could not load 7d rolling Volume / Open Interest ratio data: {exc}")
@@ -274,7 +274,7 @@ def render_kpi_2() -> None:
             merged_with_opinion = pd.concat([merged_market_data, opinion_market_data], ignore_index=True)
             rolling_ratio_with_opinion = compute_rolling_volume_oi_ratio(
                 merged_with_opinion,
-                lookback_days=90,
+                lookback_days=180,
                 rolling_days=7,
             )
             if not rolling_ratio_with_opinion.empty:
