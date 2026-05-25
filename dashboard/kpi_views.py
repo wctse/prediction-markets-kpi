@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -81,9 +82,35 @@ def _build_interpolation_points(market_share_df: pd.DataFrame) -> pd.DataFrame:
     if interpolated_df.empty:
         return pd.DataFrame()
 
+    market_share_sorted = market_share_df.sort_values(["source", "date"]).copy()
+
+    def _neighbor_points(row: pd.Series) -> list[dict[str, object]]:
+        source_rows = market_share_sorted[market_share_sorted["source"] == row["source"]]
+        anchor_rows = source_rows[(~source_rows["was_interpolated"]) & source_rows["open_interest_usd"].notna()]
+
+        previous_row = anchor_rows[anchor_rows["date"] < row["date"]].tail(1)
+        next_row = anchor_rows[anchor_rows["date"] > row["date"]].head(1)
+
+        neighbors = []
+        for neighbor_df in (previous_row, next_row):
+            if neighbor_df.empty:
+                continue
+            neighbor = neighbor_df.iloc[0]
+            neighbors.append(
+                {
+                    "date": neighbor["date"].strftime("%Y-%m-%d"),
+                    "open_interest": float(neighbor["open_interest_usd"]),
+                }
+            )
+        return neighbors
+
     interpolation_points = interpolated_df[
         ["date", "source", "open_interest_original_usd", "open_interest_usd", "notional_volume_usd"]
     ].drop_duplicates(subset=["date", "source"])
+    interpolation_points["interpolation_neighbors"] = interpolation_points.apply(_neighbor_points, axis=1)
+    interpolation_points["interpolation_neighbors"] = interpolation_points["interpolation_neighbors"].map(
+        lambda neighbors: json.dumps(neighbors)
+    )
     interpolation_points = interpolation_points.rename(
         columns={
             "date": "date",
@@ -140,11 +167,16 @@ def render_kpi_1() -> None:
     market_share_chart_placeholder = st.empty()
     market_absolute_chart_placeholder = st.empty()
     interpolation_audit_table_placeholder = st.empty()
+    market_share_chart_placeholder.info("Loading...")
+    market_absolute_chart_placeholder.info("Loading...")
+    charts_rendered = False
 
     try:
         merged_market_data = fetch_merged_market_data()
         market_share_df = compute_open_interest_market_share(merged_market_data, lookback_days=90)
     except Exception as exc:
+        market_share_chart_placeholder.empty()
+        market_absolute_chart_placeholder.empty()
         st.warning(f"Could not load open interest market share data: {exc}")
         st.stop()
 
@@ -156,6 +188,7 @@ def render_kpi_1() -> None:
         _render_interpolation_note(market_share_df, interpolation_note_placeholder)
         _render_market_share_chart(market_share_df, market_share_chart_placeholder, market_absolute_chart_placeholder)
         _render_interpolation_audit_table(market_share_df, interpolation_audit_table_placeholder)
+        charts_rendered = True
 
     opinion_status = st.empty()
     opinion_status.info("Loading Opinion from Dune…")
@@ -175,7 +208,8 @@ def render_kpi_1() -> None:
                     market_absolute_chart_placeholder,
                 )
                 _render_interpolation_audit_table(market_share_with_opinion, interpolation_audit_table_placeholder)
-                opinion_status.success("Opinion loaded from Dune.")
+                charts_rendered = True
+                opinion_status.empty()
             else:
                 opinion_status.warning("Opinion Dune data loaded but produced no valid KPI 1 points.")
         else:
@@ -188,6 +222,10 @@ def render_kpi_1() -> None:
             opinion_status.empty()
         except Exception:
             pass
+
+    if not charts_rendered:
+        market_share_chart_placeholder.empty()
+        market_absolute_chart_placeholder.empty()
 
     snapshot_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     st.caption(f"Data refresh time: {snapshot_time}")
@@ -211,11 +249,14 @@ def _render_ratio_chart(ratio_df: pd.DataFrame, chart_placeholder) -> None:
 
 def render_kpi_2() -> None:
     ratio_chart_placeholder = st.empty()
+    ratio_chart_placeholder.info("Loading...")
+    chart_rendered = False
 
     try:
         merged_market_data = fetch_merged_market_data()
         rolling_ratio_df = compute_rolling_volume_oi_ratio(merged_market_data, lookback_days=90, rolling_days=7)
     except Exception as exc:
+        ratio_chart_placeholder.empty()
         st.warning(f"Could not load 7d rolling Volume / Open Interest ratio data: {exc}")
         st.stop()
 
@@ -223,6 +264,7 @@ def render_kpi_2() -> None:
         st.info("No valid merged data points available for the 7d rolling Volume / Open Interest ratio chart.")
     else:
         _render_ratio_chart(rolling_ratio_df, ratio_chart_placeholder)
+        chart_rendered = True
 
     opinion_status = st.empty()
     opinion_status.info("Loading Opinion from Dune…")
@@ -237,7 +279,8 @@ def render_kpi_2() -> None:
             )
             if not rolling_ratio_with_opinion.empty:
                 _render_ratio_chart(rolling_ratio_with_opinion, ratio_chart_placeholder)
-                opinion_status.success("Opinion loaded from Dune.")
+                chart_rendered = True
+                opinion_status.empty()
             else:
                 opinion_status.warning("Opinion Dune data loaded but produced no valid KPI 2 points.")
         else:
@@ -251,18 +294,24 @@ def render_kpi_2() -> None:
         except Exception:
             pass
 
+    if not chart_rendered:
+        ratio_chart_placeholder.empty()
+
     snapshot_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     st.caption(f"Data refresh time: {snapshot_time}")
 
 
 def render_kpi_3() -> None:
     st.caption(KPI_3_SUBTITLE)
+    chart_placeholder = st.empty()
+    chart_placeholder.info("Loading...")
 
     try:
         kalshi_raw = fetch_kalshi_orderbook(KALSHI_MARKET_TICKER_DEFAULT)
         poly_raw = fetch_polymarket_orderbook(POLY_YES_TOKEN_ID_DEFAULT)
         opinion_raw = fetch_opinion_orderbook()
     except (requests.RequestException, ValueError) as exc:
+        chart_placeholder.empty()
         st.error(f"Live fetch failed: {exc}")
         st.stop()
 
@@ -281,21 +330,25 @@ def render_kpi_3() -> None:
     )
 
     chart_df = slippage[slippage["executed_usd"] > 0].copy()
-    fig = px.line(
-        chart_df,
-        x="executed_usd",
-        y="avg_slippage_pct",
-        color="platform",
-        color_discrete_map=PLATFORM_COLORS,
-        markers=True,
-        hover_data={"mid": ":.4f"},
-        title=f"{TITLE}<br><sup>Average over YES and NO</sup>",
-    )
-    fig.update_xaxes(type="log", title_text="USD executed (log scale)")
-    fig.update_yaxes(title_text="Slippage (%)", range=[0, 30])
-    fig.update_layout(legend_title_text="Platform", template="plotly_white")
+    if chart_df.empty:
+        chart_placeholder.empty()
+        st.info("No valid slippage points available for the live depth comparison chart.")
+    else:
+        fig = px.line(
+            chart_df,
+            x="executed_usd",
+            y="avg_slippage_pct",
+            color="platform",
+            color_discrete_map=PLATFORM_COLORS,
+            markers=True,
+            hover_data={"mid": ":.4f"},
+            title=f"{TITLE}<br><sup>Average over YES and NO</sup>",
+        )
+        fig.update_xaxes(type="log", title_text="USD executed (log scale)")
+        fig.update_yaxes(title_text="Slippage (%)", range=[0, 30])
+        fig.update_layout(legend_title_text="Platform", template="plotly_white")
 
-    st.plotly_chart(fig, use_container_width=True)
+        chart_placeholder.plotly_chart(fig, use_container_width=True)
 
     with st.expander("Current ladder data"):
         st.dataframe(
