@@ -303,6 +303,7 @@ def render_kpi_2() -> None:
 
 def render_kpi_3() -> None:
     st.caption(KPI_3_SUBTITLE)
+    warning_placeholder = st.empty()
     chart_placeholder = st.empty()
     chart_placeholder.info("Loading...")
 
@@ -328,6 +329,26 @@ def render_kpi_3() -> None:
         ],
         ignore_index=True,
     )
+
+    opinion_slippage_at_ten = (
+        slippage[
+            (slippage["platform"] == "Opinion")
+            & (slippage["executed_usd"] >= 10)
+            & slippage["avg_slippage_pct"].notna()
+        ]
+        .sort_values("executed_usd")
+        .head(1)
+    )
+    if (
+        not opinion_slippage_at_ten.empty
+        and float(opinion_slippage_at_ten.iloc[0]["avg_slippage_pct"]) > 25
+    ):
+        warning_placeholder.error(
+            "⚠️ Opinion slippage is already above 25% at $10 executed. "
+            "Its curve is above the chart range — pan to see it."
+        )
+    else:
+        warning_placeholder.empty()
 
     chart_df = slippage[slippage["executed_usd"] > 0].copy()
     if chart_df.empty:
