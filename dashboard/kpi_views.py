@@ -80,18 +80,16 @@ def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder,
         y="open_interest_share_pct",
         color="source",
         color_discrete_map=PLATFORM_COLORS,
+        custom_data=[
+            "date_week_label",
+            "open_interest_usd",
+            "open_interest_original_usd",
+            "was_interpolated",
+            "total_open_interest_usd",
+        ],
         title=OPEN_INTEREST_SHARE_TITLE,
     )
     market_share_fig.update_traces(
-        customdata=chart_df[
-            [
-                "date_week_label",
-                "open_interest_usd",
-                "open_interest_original_usd",
-                "was_interpolated",
-                "total_open_interest_usd",
-            ]
-        ],
         hovertemplate=(
             "Date: %{customdata[0]}"
             "<br>Platform: %{fullData.name}"
@@ -115,18 +113,16 @@ def _render_market_share_chart(market_share_df: pd.DataFrame, chart_placeholder,
         y="open_interest_usd",
         color="source",
         color_discrete_map=PLATFORM_COLORS,
+        custom_data=[
+            "date_week_label",
+            "open_interest_original_usd",
+            "was_interpolated",
+            "total_open_interest_usd",
+            "open_interest_share_pct",
+        ],
         title=OPEN_INTEREST_ABSOLUTE_TITLE,
     )
     market_absolute_fig.update_traces(
-        customdata=chart_df[
-            [
-                "date_week_label",
-                "open_interest_original_usd",
-                "was_interpolated",
-                "total_open_interest_usd",
-                "open_interest_share_pct",
-            ]
-        ],
         hovertemplate=(
             "Date: %{customdata[0]}"
             "<br>Platform: %{fullData.name}"
@@ -313,11 +309,11 @@ def _render_ratio_chart(
         y="volume_oi_ratio_7d",
         color="source",
         color_discrete_map=PLATFORM_COLORS,
+        custom_data=["date_week_label"],
         markers=True,
         title=chart_title,
     )
     ratio_fig.update_traces(
-        customdata=chart_df[["date_week_label"]],
         hovertemplate=(
             "Date: %{customdata[0]}"
             "<br>Platform: %{fullData.name}"
@@ -478,11 +474,11 @@ def render_kpi_3() -> None:
             y="avg_slippage_pct",
             color="platform",
             color_discrete_map=PLATFORM_COLORS,
+            custom_data=["mid"],
             markers=True,
             title=f"{TITLE}<br><sup>Average over YES and NO</sup>",
         )
         fig.update_traces(
-            customdata=chart_df[["mid"]],
             hovertemplate=(
                 "Platform: %{fullData.name}"
                 "<br>USD executed: $%{x:,.0f}"
